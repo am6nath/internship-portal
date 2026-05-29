@@ -1,0 +1,61 @@
+{
+  "Files": [
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\resumes\\0c635811-d9ce-413d-83cd-22b4da8e776f.pdf",
+      "PackagePath": "staticwebassets\\resumes\\0c635811-d9ce-413d-83cd-22b4da8e776f.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\resumes\\ceb5e4c0-4b8f-4e8e-9574-37101934825c.pdf",
+      "PackagePath": "staticwebassets\\resumes\\ceb5e4c0-4b8f-4e8e-9574-37101934825c.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\69a5214e-06e3-40f1-a7c6-f6c695508cfa.pdf",
+      "PackagePath": "staticwebassets\\training-materials\\69a5214e-06e3-40f1-a7c6-f6c695508cfa.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\6dfb63cd-a94f-45b5-baef-a56e293b93b1.pdf",
+      "PackagePath": "staticwebassets\\training-materials\\6dfb63cd-a94f-45b5-baef-a56e293b93b1.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\912c37e8-8672-4026-9770-59fb5772177b.jpg",
+      "PackagePath": "staticwebassets\\training-materials\\912c37e8-8672-4026-9770-59fb5772177b.jpg"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\94ef0e6e-d748-47c7-9868-13740664a04a.jpg",
+      "PackagePath": "staticwebassets\\training-materials\\94ef0e6e-d748-47c7-9868-13740664a04a.jpg"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\97a8ea9b-a955-44fe-9a68-ad8d443f453a.pdf",
+      "PackagePath": "staticwebassets\\training-materials\\97a8ea9b-a955-44fe-9a68-ad8d443f453a.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\a204b90a-d525-4865-9d79-c1984fc5f411.pdf",
+      "PackagePath": "staticwebassets\\training-materials\\a204b90a-d525-4865-9d79-c1984fc5f411.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\ea62acd8-92ba-4539-b772-0713cacc2a98.pdf",
+      "PackagePath": "staticwebassets\\training-materials\\ea62acd8-92ba-4539-b772-0713cacc2a98.pdf"
+    },
+    {
+      "Id": "D:\\Intershippp\\backend\\wwwroot\\training-materials\\fd95e37e-f8f9-44df-a011-5cba9e08b5e0.jpg",
+      "PackagePath": "staticwebassets\\training-materials\\fd95e37e-f8f9-44df-a011-5cba9e08b5e0.jpg"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.InternshipPortal.API.Microsoft.AspNetCore.StaticWebAssets.props",
+      "PackagePath": "build\\Microsoft.AspNetCore.StaticWebAssets.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.build.InternshipPortal.API.props",
+      "PackagePath": "build\\InternshipPortal.API.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.buildMultiTargeting.InternshipPortal.API.props",
+      "PackagePath": "buildMultiTargeting\\InternshipPortal.API.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.buildTransitive.InternshipPortal.API.props",
+      "PackagePath": "buildTransitive\\InternshipPortal.API.props"
+    }
+  ],
+  "ElementsToRemove": []
+}
