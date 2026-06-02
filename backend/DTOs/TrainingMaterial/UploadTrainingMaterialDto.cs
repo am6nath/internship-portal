@@ -14,6 +14,6 @@ namespace InternshipPortal.API.DTOs.TrainingMaterial
 
         public bool CompletedStudentsOnly { get; set; }
 
-        public IFormFile File { get; set; }
+        public IFormFile? File { get; set; }
     }
 }

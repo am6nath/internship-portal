@@ -24,5 +24,10 @@ Task<IEnumerable<InternshipResponseDto>>
     GetAllInternshipsAsync(
         InternshipFilterDto filter);
 
+        Task<InternshipResponseDto?> UploadCoverImageAsync(
+            Guid internshipId,
+            Guid adminId,
+            IFormFile file);
+
     }
 }

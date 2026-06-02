@@ -2,6 +2,7 @@ namespace InternshipPortal.API.DTOs.Application
 {
     public class StartTestResponseDto
     {
+        public string TestType { get; set; } = "PreTest";
         public string SessionToken { get; set; } = string.Empty;
         public int TotalQuestions { get; set; }
         public int PassingScorePercent { get; set; }

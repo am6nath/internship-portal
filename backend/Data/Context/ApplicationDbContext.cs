@@ -148,6 +148,10 @@ namespace InternshipPortal.API.Data.Context
                 .WithMany()
                 .HasForeignKey(x => x.ApplicationId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            builder.Entity<InternshipTestSession>()
+                .Property(x => x.TestType)
+                .HasConversion<string>();
         }
     }
 }

@@ -36,8 +36,9 @@ namespace InternshipPortal.API.Middleware
             context.Response.ContentType =
                 "application/json";
 
-            context.Response.StatusCode =
-                (int)HttpStatusCode.BadRequest;
+            context.Response.StatusCode = exception is UnauthorizedAccessException
+                ? (int)HttpStatusCode.Unauthorized
+                : (int)HttpStatusCode.BadRequest;
 
             var response = new
             {

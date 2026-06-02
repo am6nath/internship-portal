@@ -6,6 +6,8 @@ namespace InternshipPortal.API.Services.Interfaces
 
         Task<string> UploadProfileImageAsync(IFormFile file);
 
+        Task<string> UploadCoverImageAsync(IFormFile file);
+
         void DeleteFile(string filePath);
     }
 }

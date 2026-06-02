@@ -1,6 +1,7 @@
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -66,8 +67,7 @@ namespace InternshipPortal.API.Controllers
 
         private Guid GetCurrentUserId()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            return Guid.Parse(userId!);
+            return User.GetCurrentUserId();
         }
     }
 }

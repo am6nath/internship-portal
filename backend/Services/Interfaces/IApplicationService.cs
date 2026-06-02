@@ -32,5 +32,10 @@ namespace InternshipPortal.API.Services.Interfaces
         Task<CertificateDetailsDto?>
             GetCertificateDetailsAsync(
                 Guid applicationId);
+
+        Task<StudentAssessmentDto?>
+            GetStudentAssessmentAsync(
+                Guid applicationId,
+                Guid adminId);
     }
 }

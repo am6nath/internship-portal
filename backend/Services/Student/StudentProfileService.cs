@@ -10,13 +10,16 @@ namespace InternshipPortal.API.Services.Student
     {
         private readonly ApplicationDbContext _context;
         private readonly IFileService _fileService;
+        private readonly IFileUrlService _fileUrlService;
 
         public StudentProfileService(
             ApplicationDbContext context,
-            IFileService fileService)
+            IFileService fileService,
+            IFileUrlService fileUrlService)
         {
             _context = context;
             _fileService = fileService;
+            _fileUrlService = fileUrlService;
         }
 
         // CREATE PROFILE
@@ -58,26 +61,28 @@ namespace InternshipPortal.API.Services.Student
 
             await _context.SaveChangesAsync();
 
-            return new StudentProfileResponseDto
+            return MapProfile(profile, user);
+        }
+
+        private StudentProfileResponseDto MapProfile(StudentProfile profile, ApplicationUser? user) =>
+            new()
             {
                 Id = profile.Id,
                 UserId = profile.UserId,
-                FullName = user.FullName,
-                Email = user.Email,
+                FullName = user?.FullName ?? profile.User?.FullName,
+                Email = user?.Email ?? profile.User?.Email,
                 CollegeName = profile.CollegeName,
                 Department = profile.Department,
                 CGPA = profile.CGPA,
                 Backlogs = profile.Backlogs,
                 GraduationYear = profile.GraduationYear,
                 Skills = profile.Skills,
-                ResumeUrl = profile.ResumeUrl,
-                ProfileImageUrl = profile.ProfileImageUrl,
+                ResumeUrl = _fileUrlService.ToPublicUrl(profile.ResumeUrl),
+                ProfileImageUrl = _fileUrlService.ToPublicUrl(profile.ProfileImageUrl),
                 IsProfileComplete = profile.IsProfileComplete,
-
                 CreatedAt = profile.CreatedAt,
                 UpdatedAt = profile.UpdatedAt
             };
-        }
 
         // GET PROFILE
         public async Task<StudentProfileResponseDto?> GetProfileAsync(
@@ -94,25 +99,7 @@ namespace InternshipPortal.API.Services.Student
                 return null;
             }
 
-            return new StudentProfileResponseDto
-            {
-                Id = profile.Id,
-                UserId = profile.UserId,
-                FullName = profile.User?.FullName,
-                Email = profile.User?.Email,
-                CollegeName = profile.CollegeName,
-                Department = profile.Department,
-                CGPA = profile.CGPA,
-                Backlogs = profile.Backlogs,
-                GraduationYear = profile.GraduationYear,
-                Skills = profile.Skills,
-                ResumeUrl = profile.ResumeUrl,
-                ProfileImageUrl = profile.ProfileImageUrl,
-                IsProfileComplete = profile.IsProfileComplete,
-
-                CreatedAt = profile.CreatedAt,
-                UpdatedAt = profile.UpdatedAt
-            };
+            return MapProfile(profile, profile.User);
         }
 
         // UPDATE PROFILE
@@ -143,25 +130,7 @@ namespace InternshipPortal.API.Services.Student
 
             await _context.SaveChangesAsync();
 
-            return new StudentProfileResponseDto
-            {
-                Id = profile.Id,
-                UserId = profile.UserId,
-                FullName = profile.User?.FullName,
-                Email = profile.User?.Email,
-                CollegeName = profile.CollegeName,
-                Department = profile.Department,
-                CGPA = profile.CGPA,
-                Backlogs = profile.Backlogs,
-                GraduationYear = profile.GraduationYear,
-                Skills = profile.Skills,
-                ResumeUrl = profile.ResumeUrl,
-                ProfileImageUrl = profile.ProfileImageUrl,
-                IsProfileComplete = profile.IsProfileComplete,
-
-                CreatedAt = profile.CreatedAt,
-                UpdatedAt = profile.UpdatedAt
-            };
+            return MapProfile(profile, profile.User);
         }
 
         // UPLOAD RESUME
@@ -197,7 +166,7 @@ namespace InternshipPortal.API.Services.Student
 
             await _context.SaveChangesAsync();
 
-            return resumePath;
+            return _fileUrlService.ToPublicUrl(resumePath);
         }
 
         // UPLOAD PROFILE IMAGE
@@ -228,7 +197,7 @@ namespace InternshipPortal.API.Services.Student
 
             await _context.SaveChangesAsync();
 
-            return imagePath;
+            return _fileUrlService.ToPublicUrl(imagePath);
         }
 
         // GET ALL PROFILES
@@ -239,24 +208,7 @@ namespace InternshipPortal.API.Services.Student
                 .Where(x => !x.IsDeleted)
                 .ToListAsync();
 
-            return profiles.Select(profile => new StudentProfileResponseDto
-            {
-                Id = profile.Id,
-                UserId = profile.UserId,
-                FullName = profile.User?.FullName,
-                Email = profile.User?.Email,
-                CollegeName = profile.CollegeName,
-                Department = profile.Department,
-                CGPA = profile.CGPA,
-                Backlogs = profile.Backlogs,
-                GraduationYear = profile.GraduationYear,
-                Skills = profile.Skills,
-                ResumeUrl = profile.ResumeUrl,
-                ProfileImageUrl = profile.ProfileImageUrl,
-                IsProfileComplete = profile.IsProfileComplete,
-                CreatedAt = profile.CreatedAt,
-                UpdatedAt = profile.UpdatedAt
-            }).ToList();
+            return profiles.Select(p => MapProfile(p, p.User)).ToList();
         }
     }
 }

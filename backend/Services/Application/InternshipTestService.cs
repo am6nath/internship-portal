@@ -7,6 +7,7 @@ using InternshipPortal.API.Data.Context;
 using InternshipPortal.API.DTOs.Application;
 using InternshipPortal.API.Entities;
 using InternshipPortal.API.Enums;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,68 +18,111 @@ namespace InternshipPortal.API.Services.Application
         private const int QuestionCount = 10;
         private const int PassingScorePercent = 70;
         private const int SessionMinutes = 45;
-        private const int MaxAttemptsPerApplication = 5;
+        private const int PreTestMaxAttempts = 1;
+        private const int CompletionTestMaxAttempts = 5;
 
         private readonly ApplicationDbContext _context;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly INotificationService _notificationService;
+        private readonly IEmailService _emailService;
 
         public InternshipTestService(
             ApplicationDbContext context,
             IHttpClientFactory httpClientFactory,
-            INotificationService notificationService)
+            INotificationService notificationService,
+            IEmailService emailService)
         {
             _context = context;
             _httpClientFactory = httpClientFactory;
             _notificationService = notificationService;
+            _emailService = emailService;
         }
 
-        public async Task<StartTestResponseDto> StartTestAsync(
-            Guid applicationId,
-            Guid studentId)
-        {
-            var application = await GetEligibleApplicationAsync(applicationId, studentId);
+        public Task<StartTestResponseDto> StartPreTestAsync(Guid applicationId, Guid studentId) =>
+            StartTestInternalAsync(applicationId, studentId, TestType.PreTest);
 
-            if (application.IsTestPassed)
+        public Task<SubmitTestResultDto> SubmitPreTestAsync(Guid applicationId, Guid studentId, SubmitTestDto model) =>
+            SubmitTestInternalAsync(applicationId, studentId, model, TestType.PreTest);
+
+        public Task<StartTestResponseDto> StartCompletionTestAsync(Guid applicationId, Guid studentId) =>
+            StartTestInternalAsync(applicationId, studentId, TestType.CompletionTest);
+
+        public Task<SubmitTestResultDto> SubmitCompletionTestAsync(Guid applicationId, Guid studentId, SubmitTestDto model) =>
+            SubmitTestInternalAsync(applicationId, studentId, model, TestType.CompletionTest);
+
+        public async Task<TestStatusResponseDto?> GetTestStatusAsync(Guid applicationId, Guid studentId)
+        {
+            var application = await _context.Applications
+                .Include(x => x.Internship)
+                .FirstOrDefaultAsync(x =>
+                    x.Id == applicationId &&
+                    x.StudentId == studentId &&
+                    !x.IsDeleted);
+
+            if (application == null) return null;
+
+            var preTestAttempts = await CountAttemptsAsync(applicationId, studentId, TestType.PreTest);
+            var completionAttempts = await CountAttemptsAsync(applicationId, studentId, TestType.CompletionTest);
+
+            return new TestStatusResponseDto
+            {
+                IsPreTestPassed = application.IsPreTestPassed,
+                PreTestScore = application.PreTestScore,
+                PreTestPassedAt = application.PreTestPassedAt,
+                IsTestPassed = application.IsTestPassed,
+                TestScore = application.TestScore,
+                TestPassedAt = application.TestPassedAt,
+                PassingScorePercent = PassingScorePercent,
+                PreTestMaxAttempts = PreTestMaxAttempts,
+                PreTestAttemptsUsed = preTestAttempts,
+                CanTakePreTest = CanTakePreTest(application, preTestAttempts),
+                CompletionTestMaxAttempts = CompletionTestMaxAttempts,
+                CompletionTestAttemptsUsed = completionAttempts,
+                CanTakeCompletionTest = CanTakeCompletionTest(application, completionAttempts),
+                Status = application.Status.ToString()
+            };
+        }
+
+        private async Task<StartTestResponseDto> StartTestInternalAsync(
+            Guid applicationId,
+            Guid studentId,
+            TestType testType)
+        {
+            var application = await GetApplicationAsync(applicationId, studentId);
+            ValidateCanStart(application, testType);
+
+            if (testType == TestType.PreTest && application.IsPreTestPassed)
+            {
+                throw new Exception("You have already passed the pre-test for this internship.");
+            }
+
+            if (testType == TestType.CompletionTest && application.IsTestPassed)
             {
                 throw new Exception("You have already passed the completion test for this internship.");
             }
 
-            var attemptCount = await _context.InternshipTestSessions
-                .CountAsync(x =>
-                    x.ApplicationId == applicationId &&
-                    x.StudentId == studentId &&
-                    !x.IsDeleted);
+            var attemptCount = await CountAttemptsAsync(applicationId, studentId, testType);
+            var maxAttempts = testType == TestType.PreTest ? PreTestMaxAttempts : CompletionTestMaxAttempts;
 
-            if (attemptCount >= MaxAttemptsPerApplication)
+            if (attemptCount >= maxAttempts)
             {
-                throw new Exception($"Maximum {MaxAttemptsPerApplication} test attempts reached. Contact your administrator.");
+                var label = testType == TestType.PreTest ? "pre-test" : "completion test";
+                throw new Exception($"Maximum {maxAttempts} {label} attempt(s) reached. Contact your administrator.");
             }
 
-            // Invalidate any open sessions
-            var openSessions = await _context.InternshipTestSessions
-                .Where(x =>
-                    x.ApplicationId == applicationId &&
-                    x.StudentId == studentId &&
-                    !x.IsSubmitted &&
-                    !x.IsDeleted &&
-                    x.ExpiresAt > DateTime.UtcNow)
-                .ToListAsync();
+            await InvalidateOpenSessionsAsync(applicationId, studentId, testType);
 
-            foreach (var s in openSessions)
-            {
-                s.IsDeleted = true;
-            }
-
-            var categoryId = MapInternshipToCategory(application.Internship);
-            var seed = ComputeSeed(applicationId, studentId, attemptCount);
-            var storedQuestions = await FetchUniqueQuestionsAsync(categoryId, seed);
+            var seed = ComputeSeed(applicationId, studentId, attemptCount, testType);
+            var storedQuestions = testType == TestType.PreTest
+                ? await FetchPreTestQuestionsAsync(seed)
+                : await FetchCompletionTestQuestionsAsync(application.Internship, seed);
 
             var sessionToken = Guid.NewGuid().ToString("N");
             var session = new InternshipTestSession
             {
                 ApplicationId = applicationId,
                 StudentId = studentId,
+                TestType = testType,
                 SessionToken = sessionToken,
                 QuestionsJson = JsonSerializer.Serialize(storedQuestions),
                 TotalQuestions = storedQuestions.Count,
@@ -91,6 +135,7 @@ namespace InternshipPortal.API.Services.Application
 
             return new StartTestResponseDto
             {
+                TestType = testType.ToString(),
                 SessionToken = sessionToken,
                 TotalQuestions = storedQuestions.Count,
                 PassingScorePercent = PassingScorePercent,
@@ -105,17 +150,19 @@ namespace InternshipPortal.API.Services.Application
             };
         }
 
-        public async Task<SubmitTestResultDto> SubmitTestAsync(
+        private async Task<SubmitTestResultDto> SubmitTestInternalAsync(
             Guid applicationId,
             Guid studentId,
-            SubmitTestDto model)
+            SubmitTestDto model,
+            TestType testType)
         {
-            var application = await GetEligibleApplicationAsync(applicationId, studentId);
+            var application = await GetApplicationAsync(applicationId, studentId);
 
             var session = await _context.InternshipTestSessions
                 .FirstOrDefaultAsync(x =>
                     x.ApplicationId == applicationId &&
                     x.StudentId == studentId &&
+                    x.TestType == testType &&
                     x.SessionToken == model.SessionToken &&
                     !x.IsDeleted);
 
@@ -161,29 +208,18 @@ namespace InternshipPortal.API.Services.Application
             session.SubmittedAt = DateTime.UtcNow;
             session.UpdatedAt = DateTime.UtcNow;
 
-            if (passed)
+            if (testType == TestType.PreTest)
             {
-                application.IsTestPassed = true;
-                application.TestScore = scorePercent;
-                application.TestPassedAt = DateTime.UtcNow;
-
-                if (application.Status == ApplicationStatus.Accepted)
-                {
-                    application.Status = ApplicationStatus.InProgress;
-                }
-
-                application.UpdatedAt = DateTime.UtcNow;
-
-                var adminId = application.Internship.AdminId;
-                await _notificationService.CreateNotificationAsync(
-                    adminId,
-                    "Certificate Ready to Issue",
-                    $"{application.Student.FullName} passed the completion test ({scorePercent}%) for '{application.Internship.Title}'. Please verify and issue the certificate.",
-                    "TestPassed"
-                );
+                await HandlePreTestResultAsync(application, passed, scorePercent);
+            }
+            else
+            {
+                await HandleCompletionTestResultAsync(application, passed, scorePercent);
             }
 
             await _context.SaveChangesAsync();
+
+            var testLabel = testType == TestType.PreTest ? "Pre-test" : "Completion test";
 
             return new SubmitTestResultDto
             {
@@ -193,47 +229,156 @@ namespace InternshipPortal.API.Services.Application
                 TotalQuestions = storedQuestions.Count,
                 PassingScorePercent = PassingScorePercent,
                 Message = passed
-                    ? "Congratulations! You passed the test. Admin has been notified to issue your certificate."
-                    : $"You scored {scorePercent}%. Minimum {PassingScorePercent}% required. You may retake the test."
+                    ? testType == TestType.PreTest
+                        ? "Congratulations! You passed the pre-test. Your internship is now in progress."
+                        : "Congratulations! You passed the completion test. Admin has been notified to issue your certificate."
+                    : testType == TestType.PreTest
+                        ? $"You scored {scorePercent}%. Minimum {PassingScorePercent}% required. You cannot retake the pre-test — contact your administrator."
+                        : $"You scored {scorePercent}%. Minimum {PassingScorePercent}% required. You may retake the completion test."
             };
         }
 
-        public async Task<object?> GetTestStatusAsync(Guid applicationId, Guid studentId)
+        private async Task HandlePreTestResultAsync(Entities.Application application, bool passed, decimal scorePercent)
         {
-            var application = await _context.Applications
-                .Include(x => x.Internship)
-                .FirstOrDefaultAsync(x =>
-                    x.Id == applicationId &&
-                    x.StudentId == studentId &&
-                    !x.IsDeleted);
-
-            if (application == null) return null;
-
-            var attempts = await _context.InternshipTestSessions
-                .CountAsync(x =>
-                    x.ApplicationId == applicationId &&
-                    x.StudentId == studentId &&
-                    !x.IsDeleted);
-
-            return new
+            if (passed)
             {
-                application.IsTestPassed,
-                application.TestScore,
-                application.TestPassedAt,
-                PassingScorePercent,
-                MaxAttempts = MaxAttemptsPerApplication,
-                AttemptsUsed = attempts,
-                CanTakeTest = CanTakeTest(application),
-                application.Status
-            };
+                application.IsPreTestPassed = true;
+                application.PreTestScore = scorePercent;
+                application.PreTestPassedAt = DateTime.UtcNow;
+                application.Status = ApplicationStatus.InProgress;
+                application.UpdatedAt = DateTime.UtcNow;
+
+                await _notificationService.CreateNotificationAsync(
+                    application.StudentId,
+                    "Pre-test Passed",
+                    $"You passed the pre-test ({scorePercent}%) for '{application.Internship.Title}'. Your internship is now in progress.",
+                    "TestResult"
+                );
+
+                await _notificationService.CreateNotificationAsync(
+                    application.Internship.AdminId,
+                    "Student Passed Pre-test",
+                    $"{application.Student.FullName} passed the pre-test ({scorePercent}%) for '{application.Internship.Title}'.",
+                    "TestPassed"
+                );
+
+                await _emailService.SendEmailAsync(
+                    application.Student.Email!,
+                    $"Pre-test Passed - {application.Internship.Title}",
+                    BuildTestResultEmail(application.Student.FullName, application.Internship.Title, "pre-test", scorePercent, true)
+                );
+
+                await _emailService.SendEmailAsync(
+                    application.Internship.Admin!.Email!,
+                    $"Student Passed Pre-test - {application.Internship.Title}",
+                    $@"Hello,
+
+{application.Student.FullName} has passed the pre-test for '{application.Internship.Title}' with a score of {scorePercent}%.
+
+The student's internship status is now In Progress.
+
+Internship Portal"
+                );
+            }
+            else
+            {
+                await _notificationService.CreateNotificationAsync(
+                    application.StudentId,
+                    "Pre-test Failed",
+                    $"You scored {scorePercent}% on the pre-test for '{application.Internship.Title}'. Minimum {PassingScorePercent}% required. Contact your administrator.",
+                    "TestResult"
+                );
+
+                await _emailService.SendEmailAsync(
+                    application.Student.Email!,
+                    $"Pre-test Result - {application.Internship.Title}",
+                    BuildTestResultEmail(application.Student.FullName, application.Internship.Title, "pre-test", scorePercent, false)
+                );
+            }
         }
 
-        private async Task<Entities.Application> GetEligibleApplicationAsync(
-            Guid applicationId,
-            Guid studentId)
+        private async Task HandleCompletionTestResultAsync(Entities.Application application, bool passed, decimal scorePercent)
+        {
+            if (passed)
+            {
+                application.IsTestPassed = true;
+                application.TestScore = scorePercent;
+                application.TestPassedAt = DateTime.UtcNow;
+                application.UpdatedAt = DateTime.UtcNow;
+
+                await _notificationService.CreateNotificationAsync(
+                    application.StudentId,
+                    "Completion Test Passed",
+                    $"You passed the completion test ({scorePercent}%) for '{application.Internship.Title}'. Your certificate will be issued soon.",
+                    "TestResult"
+                );
+
+                await _notificationService.CreateNotificationAsync(
+                    application.Internship.AdminId,
+                    "Certificate Ready to Issue",
+                    $"{application.Student.FullName} passed the completion test ({scorePercent}%) for '{application.Internship.Title}'. Please verify and issue the certificate.",
+                    "TestPassed"
+                );
+
+                await _emailService.SendEmailAsync(
+                    application.Student.Email!,
+                    $"Completion Test Passed - {application.Internship.Title}",
+                    BuildTestResultEmail(application.Student.FullName, application.Internship.Title, "completion test", scorePercent, true)
+                );
+
+                await _emailService.SendEmailAsync(
+                    application.Internship.Admin!.Email!,
+                    $"Student Passed Completion Test - {application.Internship.Title}",
+                    $@"Hello,
+
+{application.Student.FullName} has passed the completion test for '{application.Internship.Title}' with a score of {scorePercent}%.
+
+Please verify and issue the certificate from the admin portal.
+
+Internship Portal"
+                );
+            }
+            else
+            {
+                await _notificationService.CreateNotificationAsync(
+                    application.StudentId,
+                    "Completion Test Failed",
+                    $"You scored {scorePercent}% on the completion test for '{application.Internship.Title}'. Minimum {PassingScorePercent}% required. You may retake the test.",
+                    "TestResult"
+                );
+
+                await _emailService.SendEmailAsync(
+                    application.Student.Email!,
+                    $"Completion Test Result - {application.Internship.Title}",
+                    BuildTestResultEmail(application.Student.FullName, application.Internship.Title, "completion test", scorePercent, false)
+                );
+            }
+        }
+
+        private static string BuildTestResultEmail(
+            string studentName,
+            string internshipTitle,
+            string testLabel,
+            decimal scorePercent,
+            bool passed) =>
+            $@"Hello {studentName},
+
+Your {testLabel} result for '{internshipTitle}' is available.
+
+Score: {scorePercent}%
+Minimum required: {PassingScorePercent}%
+Result: {(passed ? "PASSED" : "FAILED")}
+
+{(passed ? "Great work! Check your portal for next steps." : "Review the material and try again if attempts remain.")}
+
+Thank you,
+Internship Portal";
+
+        private async Task<Entities.Application> GetApplicationAsync(Guid applicationId, Guid studentId)
         {
             var application = await _context.Applications
                 .Include(x => x.Internship)
+                    .ThenInclude(i => i.Admin)
                 .Include(x => x.Student)
                 .FirstOrDefaultAsync(x =>
                     x.Id == applicationId &&
@@ -245,47 +390,142 @@ namespace InternshipPortal.API.Services.Application
                 throw new Exception("Application not found.");
             }
 
-            if (!CanTakeTest(application))
-            {
-                throw new Exception(
-                    "Completion test is only available for accepted or in-progress internships that are not yet completed.");
-            }
-
             return application;
         }
 
-        private static bool CanTakeTest(Entities.Application application)
+        private static void ValidateCanStart(Entities.Application application, TestType testType)
         {
-            if (application.IsCompleted) return false;
+            if (application.IsCompleted)
+            {
+                throw new Exception("This internship application is already completed.");
+            }
 
-            return application.Status is ApplicationStatus.Accepted
-                or ApplicationStatus.InProgress;
+            if (testType == TestType.PreTest)
+            {
+                if (application.Status != ApplicationStatus.Accepted)
+                {
+                    throw new Exception("Pre-test is only available after your application has been accepted.");
+                }
+            }
+            else if (!application.IsPreTestPassed)
+            {
+                throw new Exception("You must pass the pre-test before taking the completion test.");
+            }
+            else if (application.Status != ApplicationStatus.InProgress)
+            {
+                throw new Exception("Completion test is only available for in-progress internships.");
+            }
         }
 
-        private async Task<List<StoredQuestion>> FetchUniqueQuestionsAsync(int categoryId, int seed)
+        private static bool CanTakePreTest(Entities.Application application, int attemptsUsed)
+        {
+            if (application.IsCompleted || application.IsPreTestPassed) return false;
+            if (application.Status != ApplicationStatus.Accepted) return false;
+            return attemptsUsed < PreTestMaxAttempts;
+        }
+
+        private static bool CanTakeCompletionTest(Entities.Application application, int attemptsUsed)
+        {
+            if (application.IsCompleted || application.IsTestPassed) return false;
+            if (!application.IsPreTestPassed) return false;
+            if (application.Status != ApplicationStatus.InProgress) return false;
+            return attemptsUsed < CompletionTestMaxAttempts;
+        }
+
+        private Task<int> CountAttemptsAsync(Guid applicationId, Guid studentId, TestType testType) =>
+            _context.InternshipTestSessions.CountAsync(x =>
+                x.ApplicationId == applicationId &&
+                x.StudentId == studentId &&
+                x.TestType == testType &&
+                !x.IsDeleted);
+
+        private async Task InvalidateOpenSessionsAsync(Guid applicationId, Guid studentId, TestType testType)
+        {
+            var openSessions = await _context.InternshipTestSessions
+                .Where(x =>
+                    x.ApplicationId == applicationId &&
+                    x.StudentId == studentId &&
+                    x.TestType == testType &&
+                    !x.IsSubmitted &&
+                    !x.IsDeleted &&
+                    x.ExpiresAt > DateTime.UtcNow)
+                .ToListAsync();
+
+            foreach (var s in openSessions)
+            {
+                s.IsDeleted = true;
+            }
+        }
+
+        private async Task<List<StoredQuestion>> FetchPreTestQuestionsAsync(int seed)
+        {
+            // Mix local CS questions (algorithms, complexity) with OpenTDB computer science category
+            var csQuestions = CsQuestionBank.GetRandomQuestions(6, seed);
+            var apiQuestions = await FetchOpenTdbQuestionsAsync(18, seed + 1, 4);
+
+            var combined = new List<StoredQuestion>();
+            var index = 0;
+
+            foreach (var (id, question, options, correct) in csQuestions)
+            {
+                combined.Add(new StoredQuestion
+                {
+                    Id = $"q{++index}",
+                    Question = question,
+                    Options = options,
+                    CorrectAnswer = correct
+                });
+            }
+
+            foreach (var q in apiQuestions)
+            {
+                q.Id = $"q{++index}";
+                combined.Add(q);
+            }
+
+            var rng = new Random(seed);
+            return combined.OrderBy(_ => rng.Next()).Take(QuestionCount).ToList();
+        }
+
+        private async Task<List<StoredQuestion>> FetchCompletionTestQuestionsAsync(
+            Entities.Internship internship,
+            int seed)
+        {
+            var categoryId = MapInternshipToCategory(internship);
+            return await FetchOpenTdbQuestionsAsync(categoryId, seed, QuestionCount);
+        }
+
+        private async Task<List<StoredQuestion>> FetchOpenTdbQuestionsAsync(int categoryId, int seed, int count)
         {
             var client = _httpClientFactory.CreateClient("OpenTdb");
             var url =
-                $"https://opentdb.com/api.php?amount={QuestionCount * 2}&category={categoryId}&type=multiple&encode=base64";
+                $"https://opentdb.com/api.php?amount={count * 2}&category={categoryId}&type=multiple&encode=base64";
 
             var response = await client.GetFromJsonAsync<OpenTdbResponse>(url);
 
-            if (response?.Results == null || response.Results.Count < QuestionCount)
+            if (response?.Results == null || response.Results.Count < count)
             {
-                // Fallback without category
-                url = $"https://opentdb.com/api.php?amount={QuestionCount * 2}&type=multiple&encode=base64";
+                url = $"https://opentdb.com/api.php?amount={count * 2}&type=multiple&encode=base64";
                 response = await client.GetFromJsonAsync<OpenTdbResponse>(url);
             }
 
             if (response?.Results == null || response.Results.Count == 0)
             {
-                throw new Exception("Unable to load test questions. Please try again later.");
+                // Fallback to CS bank for completion test too
+                return CsQuestionBank.GetRandomQuestions(count, seed)
+                    .Select((q, i) => new StoredQuestion
+                    {
+                        Id = $"q{i + 1}",
+                        Question = q.Question,
+                        Options = q.Options,
+                        CorrectAnswer = q.CorrectAnswer
+                    }).ToList();
             }
 
             var rng = new Random(seed);
-            var shuffled = response.Results.OrderBy(_ => rng.Next()).Take(QuestionCount).ToList();
-
+            var shuffled = response.Results.OrderBy(_ => rng.Next()).Take(count).ToList();
             var questions = new List<StoredQuestion>();
+
             for (var i = 0; i < shuffled.Count; i++)
             {
                 var item = shuffled[i];
@@ -317,30 +557,31 @@ namespace InternshipPortal.API.Services.Application
                 || text.Contains("python") || text.Contains("c#") || text.Contains("computer")
                 || text.Contains("software") || text.Contains("developer") || text.Contains("it"))
             {
-                return 18; // Science: Computers
+                return 18;
             }
 
             if (text.Contains("science") || text.Contains("electronics") || text.Contains("mechanical"))
             {
-                return 17; // Science & Nature
+                return 17;
             }
 
             if (text.Contains("business") || text.Contains("marketing") || text.Contains("finance"))
             {
-                return 9; // General Knowledge
+                return 9;
             }
 
             if (text.Contains("history")) return 23;
             if (text.Contains("geography") || text.Contains("civil")) return 22;
 
-            return 9;
+            return 18;
         }
 
-        private static int ComputeSeed(Guid applicationId, Guid studentId, int attemptOffset)
+        private static int ComputeSeed(Guid applicationId, Guid studentId, int attemptOffset, TestType testType)
         {
             var bytes = applicationId.ToByteArray()
                 .Concat(studentId.ToByteArray())
                 .Concat(BitConverter.GetBytes(attemptOffset))
+                .Concat(BitConverter.GetBytes((int)testType))
                 .ToArray();
             return BitConverter.ToInt32(SHA256.HashData(bytes), 0);
         }

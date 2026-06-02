@@ -21,8 +21,8 @@ namespace InternshipPortal.API.Services.File
             ".webp"
         };
 
-        private const long MaxResumeSize = 5 * 1024 * 1024;
-        private const long MaxImageSize = 2 * 1024 * 1024;
+        private const long MaxResumeSize = 10 * 1024 * 1024;
+        private const long MaxImageSize = 5 * 1024 * 1024;
 
         public FileService(IWebHostEnvironment environment)
         {
@@ -31,115 +31,123 @@ namespace InternshipPortal.API.Services.File
 
         public async Task<string> UploadResumeAsync(IFormFile file)
         {
-            // FILE NULL CHECK
-            if (file == null || file.Length == 0)
-            {
-                throw new Exception("File is required");
-            }
+            ValidateFile(file, _allowedResumeExtensions, MaxResumeSize, "resume");
 
-            // FILE SIZE CHECK
-            if (file.Length > MaxResumeSize)
-            {
-                throw new Exception("File size exceeds 5MB");
-            }
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var fileName = $"{Guid.NewGuid()}{extension}";
+            var folderPath = Path.Combine(GetWebRootPath(), "resumes");
 
-            // EXTENSION CHECK
-            var extension = Path.GetExtension(file.FileName)
-                .ToLower();
-
-            if (!_allowedResumeExtensions.Contains(extension))
-            {
-                throw new Exception(
-                    "Only PDF, DOC, DOCX files are allowed"
-                );
-            }
-
-            // UNIQUE FILE NAME
-            var fileName =
-                $"{Guid.NewGuid()}{extension}";
-
-            // FOLDER PATH
-            var folderPath = Path.Combine(
-                _environment.WebRootPath,
-                "resumes"
-            );
-
-            // CREATE FOLDER IF NOT EXISTS
-            if (!Directory.Exists(folderPath))
-            {
-                Directory.CreateDirectory(folderPath);
-            }
-
-            // FULL FILE PATH
-            var filePath = Path.Combine(
-                folderPath,
-                fileName
-            );
-
-            // SAVE FILE
-            using (var stream = new FileStream(
-                filePath,
-                FileMode.Create))
-            {
-                await file.CopyToAsync(stream);
-            }
-
-            // RETURN RELATIVE PATH
-            return $"/resumes/{fileName}";
+            return await SaveFileAsync(file, folderPath, fileName, "/resumes");
         }
 
         public async Task<string> UploadProfileImageAsync(IFormFile file)
         {
-            if (file == null || file.Length == 0)
-            {
-                throw new Exception("File is required");
-            }
+            ValidateFile(file, _allowedImageExtensions, MaxImageSize, "image");
 
-            if (file.Length > MaxImageSize)
-            {
-                throw new Exception("Image size exceeds 2MB");
-            }
-
-            var extension = Path.GetExtension(file.FileName).ToLower();
-
-            if (!_allowedImageExtensions.Contains(extension))
-            {
-                throw new Exception("Only JPG, PNG, and WEBP images are allowed");
-            }
-
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
             var fileName = $"{Guid.NewGuid()}{extension}";
+            var folderPath = Path.Combine(GetWebRootPath(), "profile-images");
 
-            var folderPath = Path.Combine(
-                _environment.WebRootPath,
-                "profile-images"
-            );
+            return await SaveFileAsync(file, folderPath, fileName, "/profile-images");
+        }
 
-            if (!Directory.Exists(folderPath))
-            {
-                Directory.CreateDirectory(folderPath);
-            }
+        public async Task<string> UploadCoverImageAsync(IFormFile file)
+        {
+            ValidateFile(file, _allowedImageExtensions, MaxImageSize, "image");
 
-            var filePath = Path.Combine(folderPath, fileName);
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var fileName = $"{Guid.NewGuid()}{extension}";
+            var folderPath = Path.Combine(GetWebRootPath(), "cover-images");
 
-            using (var stream = new FileStream(filePath, FileMode.Create))
-            {
-                await file.CopyToAsync(stream);
-            }
-
-            return $"/profile-images/{fileName}";
+            return await SaveFileAsync(file, folderPath, fileName, "/cover-images");
         }
 
         public void DeleteFile(string filePath)
         {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return;
+            }
+
+            var relativePath = filePath;
+            if (filePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                filePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    relativePath = new Uri(filePath).AbsolutePath;
+                }
+                catch
+                {
+                    return;
+                }
+            }
+
             var fullPath = Path.Combine(
-                _environment.WebRootPath,
-                filePath.TrimStart('/')
+                GetWebRootPath(),
+                relativePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)
             );
 
             if (System.IO.File.Exists(fullPath))
             {
                 System.IO.File.Delete(fullPath);
             }
+        }
+
+        private string GetWebRootPath()
+        {
+            var path = _environment.WebRootPath;
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                path = Path.Combine(_environment.ContentRootPath, "wwwroot");
+            }
+
+            Directory.CreateDirectory(path);
+            return path;
+        }
+
+        private static void ValidateFile(
+            IFormFile file,
+            string[] allowedExtensions,
+            long maxSize,
+            string fileLabel)
+        {
+            if (file == null || file.Length == 0)
+            {
+                throw new Exception("File is required. Send multipart/form-data with field name 'file'.");
+            }
+
+            if (file.Length > maxSize)
+            {
+                throw new Exception($"File size exceeds {maxSize / (1024 * 1024)}MB");
+            }
+
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+            if (string.IsNullOrEmpty(extension) || !allowedExtensions.Contains(extension))
+            {
+                throw new Exception(
+                    fileLabel == "resume"
+                        ? "Only PDF, DOC, and DOCX files are allowed"
+                        : "Only JPG, PNG, and WEBP images are allowed");
+            }
+        }
+
+        private static async Task<string> SaveFileAsync(
+            IFormFile file,
+            string folderPath,
+            string fileName,
+            string urlPrefix)
+        {
+            Directory.CreateDirectory(folderPath);
+
+            var filePath = Path.Combine(folderPath, fileName);
+
+            await using var stream = new FileStream(filePath, FileMode.Create);
+            await file.CopyToAsync(stream);
+
+            return $"{urlPrefix}/{fileName}";
         }
     }
 }

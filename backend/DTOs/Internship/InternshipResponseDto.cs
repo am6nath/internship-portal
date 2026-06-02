@@ -51,5 +51,16 @@ namespace InternshipPortal.API.DTOs.Internship
         public DateTime? UpdatedAt { get; set; }
 
         public string? CoverImageUrl { get; set; }
+
+        // Student browse (populated on /eligible and /browse)
+        public bool IsEligible { get; set; }
+
+        public bool CanApply { get; set; }
+
+        public bool HasApplied { get; set; }
+
+        public string? IneligibilityReason { get; set; }
+
+        public bool IsOpenForRegistration { get; set; }
     }
 }

@@ -1,6 +1,7 @@
 using InternshipPortal.API.Data.Context;
 using InternshipPortal.API.DTOs.Internship;
 using InternshipPortal.API.Entities;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,11 +10,14 @@ namespace InternshipPortal.API.Services.Internship
     public class InternshipService : IInternshipService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IFileService _fileService;
 
         public InternshipService(
-            ApplicationDbContext context)
+            ApplicationDbContext context,
+            IFileService fileService)
         {
             _context = context;
+            _fileService = fileService;
         }
 
         private async Task CloseExpiredRegistrationInternshipsAsync()
@@ -23,7 +27,7 @@ namespace InternshipPortal.API.Services.Internship
                 .Where(x =>
                     !x.IsDeleted &&
                     x.IsActive &&
-                    x.RegistrationDeadline < now)
+                    x.RegistrationDeadline.Date < now.Date)
                 .ToListAsync();
 
             if (expired.Count == 0)
@@ -82,51 +86,20 @@ namespace InternshipPortal.API.Services.Internship
                 CreatedBy = adminId,
 
                 CoverImageUrl = string.IsNullOrWhiteSpace(model.CoverImageUrl)
-                    ? "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=1200"
+                    ? null
                     : model.CoverImageUrl
             };
+
+            if (string.IsNullOrWhiteSpace(internship.CoverImageUrl))
+            {
+                internship.CoverImageUrl = InternshipCoverImageHelper.GetDynamicCoverImageUrl(internship);
+            }
 
             _context.Internships.Add(internship);
 
             await _context.SaveChangesAsync();
 
-            return new InternshipResponseDto
-            {
-                Id = internship.Id,
-
-                Title = internship.Title,
-                Description = internship.Description,
-                CompanyName = internship.CompanyName,
-                Location = internship.Location,
-                Stipend = internship.Stipend,
-                DurationInMonths = internship.DurationInMonths,
-
-                // ELIGIBILITY
-                MinimumCGPA = internship.MinimumCGPA,
-                AllowedBacklogs = internship.AllowedBacklogs,
-                RequiredSkills = internship.RequiredSkills,
-                AllowedDepartments = internship.AllowedDepartments,
-                GraduationYear = internship.GraduationYear,
-
-                // SEATS
-                TotalSeats = internship.TotalSeats,
-                AvailableSeats = internship.AvailableSeats,
-
-                // STATUS
-                IsActive = internship.IsActive,
-                IsExpired = internship.IsExpired,
-                IsSeatsFilled = internship.IsSeatsFilled,
-
-                // DATES
-                StartDate = internship.StartDate,
-                EndDate = internship.EndDate,
-                RegistrationDeadline = internship.RegistrationDeadline,
-
-                // AUDIT
-                CreatedAt = internship.CreatedAt,
-                UpdatedAt = internship.UpdatedAt,
-                CoverImageUrl = internship.CoverImageUrl
-            };
+            return MapToResponseDto(internship);
         }
         // UPDATE INTERNSHIP
         public async Task<InternshipResponseDto?>
@@ -186,43 +159,7 @@ namespace InternshipPortal.API.Services.Internship
 
             await _context.SaveChangesAsync();
 
-            return new InternshipResponseDto
-            {
-                Id = internship.Id,
-
-                Title = internship.Title,
-                Description = internship.Description,
-                CompanyName = internship.CompanyName,
-                Location = internship.Location,
-                Stipend = internship.Stipend,
-                DurationInMonths = internship.DurationInMonths,
-
-                // ELIGIBILITY
-                MinimumCGPA = internship.MinimumCGPA,
-                AllowedBacklogs = internship.AllowedBacklogs,
-                RequiredSkills = internship.RequiredSkills,
-                AllowedDepartments = internship.AllowedDepartments,
-                GraduationYear = internship.GraduationYear,
-
-                // SEATS
-                TotalSeats = internship.TotalSeats,
-                AvailableSeats = internship.AvailableSeats,
-
-                // STATUS
-                IsActive = internship.IsActive,
-                IsExpired = internship.IsExpired,
-                IsSeatsFilled = internship.IsSeatsFilled,
-
-                // DATES
-                StartDate = internship.StartDate,
-                EndDate = internship.EndDate,
-                RegistrationDeadline = internship.RegistrationDeadline,
-
-                // AUDIT
-                CreatedAt = internship.CreatedAt,
-                UpdatedAt = internship.UpdatedAt,
-                CoverImageUrl = internship.CoverImageUrl
-            };
+            return MapToResponseDto(internship);
         }
         // DELETE INTERNSHIP (SOFT DELETE)
         public async Task<bool> DeleteInternshipAsync(
@@ -274,59 +211,33 @@ namespace InternshipPortal.API.Services.Internship
                 return null;
             }
 
-            if (internship.RegistrationDeadline < DateTime.UtcNow && internship.IsActive)
+            var now = DateTime.UtcNow;
+            var changed = false;
+
+            if (internship.RegistrationDeadline.Date < now.Date && internship.IsActive)
             {
                 internship.IsActive = false;
-                internship.UpdatedAt = DateTime.UtcNow;
-                await _context.SaveChangesAsync();
+                internship.UpdatedAt = now;
+                changed = true;
             }
 
-            // CHECK EXPIRY
-            if (internship.EndDate < DateTime.UtcNow)
+            if (internship.EndDate.Date < now.Date)
             {
                 internship.IsExpired = true;
-                internship.IsActive = false;
+                if (internship.IsActive)
+                {
+                    internship.IsActive = false;
+                }
+                internship.UpdatedAt = now;
+                changed = true;
+            }
 
+            if (changed)
+            {
                 await _context.SaveChangesAsync();
             }
 
-            return new InternshipResponseDto
-            {
-                Id = internship.Id,
-
-                Title = internship.Title,
-                Description = internship.Description,
-                CompanyName = internship.CompanyName,
-                Location = internship.Location,
-                Stipend = internship.Stipend,
-                DurationInMonths = internship.DurationInMonths,
-
-                // ELIGIBILITY
-                MinimumCGPA = internship.MinimumCGPA,
-                AllowedBacklogs = internship.AllowedBacklogs,
-                RequiredSkills = internship.RequiredSkills,
-                AllowedDepartments = internship.AllowedDepartments,
-                GraduationYear = internship.GraduationYear,
-
-                // SEATS
-                TotalSeats = internship.TotalSeats,
-                AvailableSeats = internship.AvailableSeats,
-
-                // STATUS
-                IsActive = internship.IsActive,
-                IsExpired = internship.IsExpired,
-                IsSeatsFilled = internship.IsSeatsFilled,
-
-                // DATES
-                StartDate = internship.StartDate,
-                EndDate = internship.EndDate,
-                RegistrationDeadline = internship.RegistrationDeadline,
-
-                // AUDIT
-                CreatedAt = internship.CreatedAt,
-                UpdatedAt = internship.UpdatedAt,
-                CoverImageUrl = internship.CoverImageUrl
-            };
+            return MapToResponseDto(internship);
         }
         // GET ALL INTERNSHIPS
         public async Task<IEnumerable<InternshipResponseDto>>
@@ -339,6 +250,17 @@ namespace InternshipPortal.API.Services.Internship
                 .Where(x =>
                     !x.IsDeleted)
                 .AsQueryable();
+
+            if (filter.OpenOnly)
+            {
+                var now = DateTime.UtcNow;
+                query = query.Where(x =>
+                    !x.IsExpired &&
+                    !x.IsSeatsFilled &&
+                    x.AvailableSeats > 0 &&
+                    x.RegistrationDeadline.Date >= now.Date &&
+                    (x.IsActive || x.RegistrationDeadline.Date >= now.Date));
+            }
 
             // SEARCH
             if (!string.IsNullOrWhiteSpace(filter.Search))
@@ -423,73 +345,72 @@ namespace InternshipPortal.API.Services.Internship
 
             var internships = await query.ToListAsync();
 
-            return internships.Select(internship =>
-                new InternshipResponseDto
-                {
-                    Id = internship.Id,
-
-                    Title = internship.Title,
-                    Description = internship.Description,
-                    CompanyName = internship.CompanyName,
-                    Location = internship.Location,
-                    Stipend = internship.Stipend,
-                    DurationInMonths =
-                        internship.DurationInMonths,
-
-                    // ELIGIBILITY
-                    MinimumCGPA =
-                        internship.MinimumCGPA,
-
-                    AllowedBacklogs =
-                        internship.AllowedBacklogs,
-
-                    RequiredSkills =
-                        internship.RequiredSkills,
-
-                    AllowedDepartments =
-                        internship.AllowedDepartments,
-
-                    GraduationYear =
-                        internship.GraduationYear,
-
-                    // SEATS
-                    TotalSeats =
-                        internship.TotalSeats,
-
-                    AvailableSeats =
-                        internship.AvailableSeats,
-
-                    // STATUS
-                    IsActive =
-                        internship.IsActive,
-
-                    IsExpired =
-                        internship.IsExpired,
-
-                    IsSeatsFilled =
-                        internship.IsSeatsFilled,
-
-                    // DATES
-                    StartDate =
-                        internship.StartDate,
-
-                    EndDate =
-                        internship.EndDate,
-
-                    RegistrationDeadline =
-                        internship.RegistrationDeadline,
-
-                    // AUDIT
-                    CreatedAt =
-                        internship.CreatedAt,
-
-                    UpdatedAt =
-                        internship.UpdatedAt,
-
-                    CoverImageUrl =
-                        internship.CoverImageUrl
-                });
+            return internships.Select(MapToResponseDto);
         }
+
+        public async Task<InternshipResponseDto?> UploadCoverImageAsync(
+            Guid internshipId,
+            Guid adminId,
+            IFormFile file)
+        {
+            var internship = await _context.Internships
+                .FirstOrDefaultAsync(x =>
+                    x.Id == internshipId &&
+                    !x.IsDeleted);
+
+            if (internship == null)
+            {
+                return null;
+            }
+
+            if (internship.AdminId != adminId)
+            {
+                throw new Exception("You are not authorized to update this internship");
+            }
+
+            if (!string.IsNullOrWhiteSpace(internship.CoverImageUrl) &&
+                internship.CoverImageUrl.StartsWith("/cover-images/"))
+            {
+                _fileService.DeleteFile(internship.CoverImageUrl);
+            }
+
+            var imageUrl = await _fileService.UploadCoverImageAsync(file);
+            internship.CoverImageUrl = imageUrl;
+            internship.UpdatedAt = DateTime.UtcNow;
+            internship.UpdatedBy = adminId;
+
+            await _context.SaveChangesAsync();
+
+            return MapToResponseDto(internship);
+        }
+
+        private static InternshipResponseDto MapToResponseDto(Entities.Internship internship) =>
+            new()
+            {
+                Id = internship.Id,
+                Title = internship.Title,
+                Description = internship.Description,
+                CompanyName = internship.CompanyName,
+                Location = internship.Location,
+                Stipend = internship.Stipend,
+                DurationInMonths = internship.DurationInMonths,
+                MinimumCGPA = internship.MinimumCGPA,
+                AllowedBacklogs = internship.AllowedBacklogs,
+                RequiredSkills = internship.RequiredSkills,
+                AllowedDepartments = internship.AllowedDepartments,
+                GraduationYear = internship.GraduationYear,
+                TotalSeats = internship.TotalSeats,
+                AvailableSeats = internship.AvailableSeats,
+                IsActive = internship.IsActive,
+                IsExpired = internship.IsExpired,
+                IsSeatsFilled = internship.IsSeatsFilled,
+                StartDate = internship.StartDate,
+                EndDate = internship.EndDate,
+                RegistrationDeadline = internship.RegistrationDeadline,
+                CreatedAt = internship.CreatedAt,
+                UpdatedAt = internship.UpdatedAt,
+                CoverImageUrl = InternshipCoverImageHelper.ResolveCoverImageUrl(internship)
+            };
     }
 }
 

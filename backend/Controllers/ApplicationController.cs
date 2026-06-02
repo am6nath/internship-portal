@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using InternshipPortal.API.DTOs.Application;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -56,16 +57,28 @@ namespace InternshipPortal.API.Controllers
         [HttpGet("my-applications")]
         public async Task<IActionResult> GetStudentApplications()
         {
-            var studentId = GetCurrentUserId();
-            var result = await _applicationService.GetStudentApplicationsAsync(studentId);
-
-            return Ok(new
+            try
             {
-                success = true,
-                statusCode = 200,
-                message = "Applications fetched successfully",
-                data = result
-            });
+                var studentId = GetCurrentUserId();
+                var result = await _applicationService.GetStudentApplicationsAsync(studentId);
+
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = "Applications fetched successfully",
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    statusCode = 400,
+                    message = ex.Message
+                });
+            }
         }
 
         // GET INTERNSHIP APPLICATIONS
@@ -138,7 +151,55 @@ namespace InternshipPortal.API.Controllers
             });
         }
 
-        // START COMPLETION TEST (Open Trivia DB)
+        // START PRE-TEST (one attempt, required after acceptance)
+        [Authorize(Roles = "Student")]
+        [HttpPost("{applicationId:guid}/pretest/start")]
+        public async Task<IActionResult> StartPreTest(Guid applicationId)
+        {
+            try
+            {
+                var studentId = GetCurrentUserId();
+                var result = await _internshipTestService.StartPreTestAsync(applicationId, studentId);
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = "Pre-test started successfully",
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, statusCode = 400, message = ex.Message });
+            }
+        }
+
+        // SUBMIT PRE-TEST
+        [Authorize(Roles = "Student")]
+        [HttpPost("{applicationId:guid}/pretest/submit")]
+        public async Task<IActionResult> SubmitPreTest(
+            Guid applicationId,
+            SubmitTestDto model)
+        {
+            try
+            {
+                var studentId = GetCurrentUserId();
+                var result = await _internshipTestService.SubmitPreTestAsync(applicationId, studentId, model);
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = result.Message,
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, statusCode = 400, message = ex.Message });
+            }
+        }
+
+        // START COMPLETION TEST
         [Authorize(Roles = "Student")]
         [HttpPost("{applicationId:guid}/test/start")]
         public async Task<IActionResult> StartCompletionTest(Guid applicationId)
@@ -146,12 +207,12 @@ namespace InternshipPortal.API.Controllers
             try
             {
                 var studentId = GetCurrentUserId();
-                var result = await _internshipTestService.StartTestAsync(applicationId, studentId);
+                var result = await _internshipTestService.StartCompletionTestAsync(applicationId, studentId);
                 return Ok(new
                 {
                     success = true,
                     statusCode = 200,
-                    message = "Test started successfully",
+                    message = "Completion test started successfully",
                     data = result
                 });
             }
@@ -171,7 +232,7 @@ namespace InternshipPortal.API.Controllers
             try
             {
                 var studentId = GetCurrentUserId();
-                var result = await _internshipTestService.SubmitTestAsync(applicationId, studentId, model);
+                var result = await _internshipTestService.SubmitCompletionTestAsync(applicationId, studentId, model);
                 return Ok(new
                 {
                     success = true,
@@ -186,7 +247,7 @@ namespace InternshipPortal.API.Controllers
             }
         }
 
-        // GET TEST STATUS
+        // GET TEST STATUS (pre-test + completion test)
         [Authorize(Roles = "Student")]
         [HttpGet("{applicationId:guid}/test/status")]
         public async Task<IActionResult> GetTestStatus(Guid applicationId)
@@ -206,6 +267,40 @@ namespace InternshipPortal.API.Controllers
                 message = "Test status fetched",
                 data = result
             });
+        }
+
+        // GET STUDENT ASSESSMENT (Admin)
+        [Authorize(Roles = "Admin")]
+        [HttpGet("{applicationId:guid}/assessment")]
+        public async Task<IActionResult> GetStudentAssessment(Guid applicationId)
+        {
+            try
+            {
+                var adminId = GetCurrentUserId();
+                var result = await _applicationService.GetStudentAssessmentAsync(applicationId, adminId);
+
+                if (result == null)
+                {
+                    return NotFound(new
+                    {
+                        success = false,
+                        statusCode = 404,
+                        message = "Application not found"
+                    });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = "Assessment fetched successfully",
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, statusCode = 400, message = ex.Message });
+            }
         }
 
         // GET PUBLIC CERTIFICATE DETAILS
@@ -249,8 +344,7 @@ namespace InternshipPortal.API.Controllers
         // GET CURRENT USER ID
         private Guid GetCurrentUserId()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            return Guid.Parse(userId!);
+            return User.GetCurrentUserId();
         }
     }
 }

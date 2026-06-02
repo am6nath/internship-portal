@@ -14,17 +14,20 @@ namespace InternshipPortal.API.Services.TrainingMaterial
         private readonly IWebHostEnvironment _environment;
         private readonly IEmailService _emailService;
         private readonly INotificationService _notificationService;
+        private readonly IFileUrlService _fileUrlService;
 
         public TrainingMaterialService(
             ApplicationDbContext context,
             IWebHostEnvironment environment,
             IEmailService emailService,
-            INotificationService notificationService)
+            INotificationService notificationService,
+            IFileUrlService fileUrlService)
         {
             _context = context;
             _environment = environment;
             _emailService = emailService;
             _notificationService = notificationService;
+            _fileUrlService = fileUrlService;
         }
 
 
@@ -104,7 +107,7 @@ namespace InternshipPortal.API.Services.TrainingMaterial
             // CREATE FOLDER
             var folderPath =
                 Path.Combine(
-                    _environment.WebRootPath,
+                    GetWebRootPath(),
                     "training-materials"
                 );
 
@@ -201,6 +204,8 @@ namespace InternshipPortal.API.Services.TrainingMaterial
                 {
                     if (application.Status !=
                             ApplicationStatus.Accepted &&
+                        application.Status !=
+                            ApplicationStatus.InProgress &&
                         application.Status !=
                             ApplicationStatus.Completed)
                     {
@@ -302,7 +307,7 @@ Internship Portal
                         x.Description,
 
                     FileUrl =
-                        x.FileUrl,
+                        _fileUrlService.ToPublicUrl(x.FileUrl),
 
                     FileType =
                         x.FileType,
@@ -386,6 +391,8 @@ Internship Portal
                     if (application.Status ==
                             ApplicationStatus.Accepted ||
                         application.Status ==
+                            ApplicationStatus.InProgress ||
+                        application.Status ==
                             ApplicationStatus.Completed)
                     {
                         accessibleMaterials
@@ -419,7 +426,7 @@ Internship Portal
                             x.Description,
 
                         FileUrl =
-                            x.FileUrl,
+                            _fileUrlService.ToPublicUrl(x.FileUrl),
 
                         FileType =
                             x.FileType,
@@ -466,6 +473,19 @@ Internship Portal
                 adminId;
 
             await _context.SaveChangesAsync();
+        }
+
+        private string GetWebRootPath()
+        {
+            var path = _environment.WebRootPath;
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                path = Path.Combine(_environment.ContentRootPath, "wwwroot");
+            }
+
+            Directory.CreateDirectory(path);
+            return path;
         }
     }
 }

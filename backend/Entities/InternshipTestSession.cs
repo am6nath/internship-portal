@@ -1,3 +1,5 @@
+using InternshipPortal.API.Enums;
+
 namespace InternshipPortal.API.Entities
 {
     public class InternshipTestSession : BaseEntity
@@ -6,6 +8,8 @@ namespace InternshipPortal.API.Entities
         public Application Application { get; set; } = null!;
 
         public Guid StudentId { get; set; }
+
+        public TestType TestType { get; set; } = TestType.PreTest;
 
         public string SessionToken { get; set; } = string.Empty;
 

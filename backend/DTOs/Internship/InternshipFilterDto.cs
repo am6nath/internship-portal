@@ -19,5 +19,8 @@ namespace InternshipPortal.API.DTOs.Internship
 
         public bool Descending { get; set; }
 
+        /// <summary>When true, only internships open for registration are returned.</summary>
+        public bool OpenOnly { get; set; } = false;
+
     }
 }

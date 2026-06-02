@@ -18,6 +18,11 @@ namespace InternshipPortal.API.DTOs.Application
 
         // STATUS
         public string Status { get; set; }
+
+        public string DisplayStatus { get; set; } = string.Empty;
+
+        public string DisplayPhase { get; set; } = string.Empty;
+
         public string? AdminRemarks { get; set; }
 
         // DATES
@@ -32,14 +37,42 @@ namespace InternshipPortal.API.DTOs.Application
 
         public bool IsCompleted { get; set; }
 
-public DateTime? CompletedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
 
-public string? CertificateUrl { get; set; }
+        public string? CertificateUrl { get; set; }
 
+        // Pre-test assessment
+        public bool IsPreTestPassed { get; set; }
+
+        public decimal? PreTestScore { get; set; }
+
+        public DateTime? PreTestPassedAt { get; set; }
+
+        public string PreTestStatus { get; set; } = string.Empty;
+
+        public int PreTestAttemptsUsed { get; set; }
+
+        // Post-test (completion) assessment
         public bool IsTestPassed { get; set; }
 
         public decimal? TestScore { get; set; }
 
+        public decimal? PostTestScore { get; set; }
+
         public DateTime? TestPassedAt { get; set; }
+
+        public string PostTestStatus { get; set; } = string.Empty;
+
+        public int PostTestAttemptsUsed { get; set; }
+
+        public decimal? OverallAssessmentScore { get; set; }
+
+        public bool CanTakePreTest { get; set; }
+
+        public bool CanTakeCompletionTest { get; set; }
+
+        public bool CanTakePostTest { get; set; }
+
+        public string? CoverImageUrl { get; set; }
     }
 }

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using InternshipPortal.API.DTOs.Student;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -101,49 +102,106 @@ namespace InternshipPortal.API.Controllers
         // UPLOAD RESUME
         [Authorize(Roles = "Student")]
         [HttpPost("upload-resume")]
-        public async Task<IActionResult> UploadResume(
-            IFormFile file)
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(10 * 1024 * 1024)]
+        public async Task<IActionResult> UploadResume(IFormFile? file)
         {
-            var userId = GetCurrentUserId();
-
-            var result = await _studentProfileService
-                .UploadResumeAsync(userId, file);
-
-            return Ok(new
+            try
             {
-                success = true,
-                statusCode = 200,
-                message = "Resume uploaded successfully",
+                file ??= FileUploadHelper.ResolveFormFile(
+                    Request,
+                    "file",
+                    "resume",
+                    "document",
+                    "upload");
 
-                data = new
+                if (file == null)
                 {
-                    resumeUrl = result,
-                    uploadedAt = DateTime.UtcNow
+                    return BadRequest(new
+                    {
+                        success = false,
+                        statusCode = 400,
+                        message = "No file received. Use multipart/form-data with field name 'file' or 'resume'."
+                    });
                 }
-            });
+
+                var userId = GetCurrentUserId();
+                var result = await _studentProfileService.UploadResumeAsync(userId, file);
+
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = "Resume uploaded successfully",
+                    data = new
+                    {
+                        resumeUrl = result,
+                        uploadedAt = DateTime.UtcNow
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    statusCode = 400,
+                    message = ex.Message
+                });
+            }
         }
 
         // UPLOAD PROFILE IMAGE
         [Authorize(Roles = "Student")]
         [HttpPost("upload-profile-image")]
-        public async Task<IActionResult> UploadProfileImage(IFormFile file)
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(5 * 1024 * 1024)]
+        public async Task<IActionResult> UploadProfileImage(IFormFile? file)
         {
-            var userId = GetCurrentUserId();
-
-            var result = await _studentProfileService
-                .UploadProfileImageAsync(userId, file);
-
-            return Ok(new
+            try
             {
-                success = true,
-                statusCode = 200,
-                message = "Profile image uploaded successfully",
-                data = new
+                file ??= FileUploadHelper.ResolveFormFile(
+                    Request,
+                    "file",
+                    "image",
+                    "profileImage",
+                    "photo",
+                    "upload");
+
+                if (file == null)
                 {
-                    profileImageUrl = result,
-                    uploadedAt = DateTime.UtcNow
+                    return BadRequest(new
+                    {
+                        success = false,
+                        statusCode = 400,
+                        message = "No file received. Use multipart/form-data with field name 'file' or 'image'."
+                    });
                 }
-            });
+
+                var userId = GetCurrentUserId();
+                var result = await _studentProfileService.UploadProfileImageAsync(userId, file);
+
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = "Profile image uploaded successfully",
+                    data = new
+                    {
+                        profileImageUrl = result,
+                        uploadedAt = DateTime.UtcNow
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    statusCode = 400,
+                    message = ex.Message
+                });
+            }
         }
 
         // GET ALL STUDENT PROFILES FOR ADMIN
@@ -162,13 +220,9 @@ namespace InternshipPortal.API.Controllers
             });
         }
 
-        // GET CURRENT USER ID FROM JWT
         private Guid GetCurrentUserId()
         {
-            var userId = User.FindFirstValue(
-                ClaimTypes.NameIdentifier);
-
-            return Guid.Parse(userId!);
+            return User.GetCurrentUserId();
         }
     }
 }

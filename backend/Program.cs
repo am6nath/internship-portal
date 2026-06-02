@@ -9,6 +9,7 @@ using InternshipPortal.API.Services.File;
 using InternshipPortal.API.Services.Interfaces;
 using InternshipPortal.API.Services.Student;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -24,7 +25,26 @@ using InternshipPortal.API.Middleware;
 var builder = WebApplication.CreateBuilder(args);
 
 // ADD CONTROLLERS
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy =
+            System.Text.Json.JsonNamingPolicy.CamelCase;
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
+
+// MULTIPART UPLOAD LIMITS
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 15 * 1024 * 1024;
+    options.ValueLengthLimit = int.MaxValue;
+    options.MultipartHeadersLengthLimit = int.MaxValue;
+});
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 15 * 1024 * 1024;
+});
 
 // MYSQL CONNECTION
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -96,7 +116,10 @@ builder.Services.AddAuthentication(options =>
             IssuerSigningKey =
                 new SymmetricSecurityKey(
                     Encoding.UTF8.GetBytes(jwtKey!)
-                )
+                ),
+
+            NameClaimType = System.Security.Claims.ClaimTypes.NameIdentifier,
+            RoleClaimType = System.Security.Claims.ClaimTypes.Role
         };
 });
 
@@ -140,6 +163,12 @@ builder.Services.AddScoped<
     IFileService,
     FileService>();
 
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddScoped<
+    IFileUrlService,
+    FileUrlService>();
+
 builder.Services.AddScoped<
     IInternshipService,
     InternshipService>();
@@ -172,20 +201,22 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     INotificationService,
     NotificationService>();
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAngular",
-        policy =>
-        {
-            policy.AllowAnyOrigin()
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        });
-});
-
-
 
 var app = builder.Build();
+
+// ENSURE UPLOAD DIRECTORIES EXIST
+var wwwrootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+Directory.CreateDirectory(wwwrootPath);
+foreach (var uploadDir in new[]
+{
+    "resumes",
+    "profile-images",
+    "cover-images",
+    "training-materials"
+})
+{
+    Directory.CreateDirectory(Path.Combine(wwwrootPath, uploadDir));
+}
 
 // SWAGGER
 if (app.Environment.IsDevelopment())
@@ -195,8 +226,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// HTTPS
-app.UseHttpsRedirection();
+// Skip HTTPS redirect in Development — it breaks multipart file uploads from Angular on http://localhost:5080
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 // CORS
 app.UseCors("AllowAngular");
@@ -205,7 +239,6 @@ app.UseCors("AllowAngular");
 app.UseStaticFiles();
 
 app.UseMiddleware<ExceptionMiddleware>();
-app.UseCors("AllowAngular");
 // AUTHENTICATION
 app.UseAuthentication();
 
@@ -215,11 +248,19 @@ app.UseAuthorization();
 // MAP CONTROLLERS
 app.MapControllers();
 
-// ROLE SEEDING
+// ROLE SEEDING + DATABASE MIGRATIONS
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    await context.Database.MigrateAsync();
+    try
+    {
+        await context.Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Database migration failed. Apply pending migrations manually with: dotnet ef database update");
+    }
 
     var roleManager = scope.ServiceProvider
         .GetRequiredService<RoleManager<IdentityRole<Guid>>>();

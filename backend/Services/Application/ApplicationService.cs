@@ -2,6 +2,7 @@ using InternshipPortal.API.Data.Context;
 using InternshipPortal.API.DTOs.Application;
 using InternshipPortal.API.Entities;
 using InternshipPortal.API.Enums;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -58,21 +59,11 @@ namespace InternshipPortal.API.Services.Application
                 );
             }
 
-            // CHECK ACTIVE
-            if (!internship.IsActive ||
-                internship.IsExpired)
+            // CHECK INTERNSHIP OPEN FOR APPLICATIONS
+            if (!EligibilityHelper.IsOpenForRegistration(internship))
             {
                 throw new Exception(
-                    "Internship is not active"
-                );
-            }
-
-            // CHECK DEADLINE
-            if (internship.RegistrationDeadline
-                < DateTime.UtcNow)
-            {
-                throw new Exception(
-                    "Registration deadline has passed"
+                    "This internship is not open for applications"
                 );
             }
 
@@ -107,35 +98,13 @@ namespace InternshipPortal.API.Services.Application
             }
 
             // ELIGIBILITY CHECK
-            if (profile.CGPA <
-                internship.MinimumCGPA)
-            {
-                throw new Exception(
-                    "CGPA criteria not matched"
-                );
-            }
+            var (isEligible, ineligibilityReason) =
+                EligibilityHelper.CheckStudentEligibility(profile, internship);
 
-            if (profile.Backlogs >
-                internship.AllowedBacklogs)
+            if (!isEligible)
             {
                 throw new Exception(
-                    "Backlog criteria not matched"
-                );
-            }
-
-            if (!internship.AllowedDepartments
-                .Contains(profile.Department))
-            {
-                throw new Exception(
-                    "Department not eligible"
-                );
-            }
-
-            if (profile.GraduationYear !=
-                internship.GraduationYear)
-            {
-                throw new Exception(
-                    "Graduation year not eligible"
+                    ineligibilityReason ?? "You are not eligible for this internship"
                 );
             }
 
@@ -157,41 +126,113 @@ namespace InternshipPortal.API.Services.Application
 
             await _context.SaveChangesAsync();
 
+            application.Student = profile.User;
+            return MapToResponseDto(application, internship);
+        }
+
+        private ApplicationResponseDto MapToResponseDto(
+            Entities.Application application,
+            Entities.Internship? internshipOverride = null,
+            Dictionary<Guid, (int PreTestAttempts, int PostTestAttempts)>? attemptCounts = null)
+        {
+            var internship = internshipOverride ?? application.Internship;
+            var appId = application.Id;
+
+            var preTestAttempts = 0;
+            var postTestAttempts = 0;
+            if (attemptCounts != null && attemptCounts.TryGetValue(appId, out var counts))
+            {
+                preTestAttempts = counts.PreTestAttempts;
+                postTestAttempts = counts.PostTestAttempts;
+            }
+
+            var canTakePreTest = CanTakePreTest(application, preTestAttempts);
+            var canTakePostTest = CanTakeCompletionTest(application, postTestAttempts);
+
             return new ApplicationResponseDto
             {
                 Id = application.Id,
-
-                StudentId = studentId,
-
-                StudentName =
-                    profile.User.FullName,
-
-                InternshipId =
-                    internship.Id,
-
-                InternshipTitle =
-                    internship.Title,
-
-                CompanyName =
-                    internship.CompanyName,
-
+                StudentId = application.StudentId,
+                StudentName = application.Student?.FullName ?? string.Empty,
+                InternshipId = application.InternshipId,
+                InternshipTitle = internship?.Title ?? string.Empty,
+                CompanyName = internship?.CompanyName ?? string.Empty,
                 Status = application.Status.ToString(),
-
-                AdminRemarks =
-                    application.AdminRemarks,
-
-                AppliedAt =
-                    application.AppliedAt,
-
-                ReviewedAt =
-                    application.ReviewedAt,
-
-                CreatedAt =
-                    application.CreatedAt,
-
-                UpdatedAt =
-                    application.UpdatedAt
+                DisplayStatus = ApplicationStatusHelper.GetDisplayStatus(application, preTestAttempts, postTestAttempts),
+                DisplayPhase = ApplicationStatusHelper.GetDisplayPhase(application, preTestAttempts),
+                AdminRemarks = application.AdminRemarks,
+                AppliedAt = application.AppliedAt,
+                ReviewedAt = application.ReviewedAt,
+                CreatedAt = application.CreatedAt,
+                UpdatedAt = application.UpdatedAt,
+                IsCompleted = application.IsCompleted,
+                CompletedAt = application.CompletedAt,
+                CertificateUrl = application.CertificateUrl,
+                IsPreTestPassed = application.IsPreTestPassed,
+                PreTestScore = application.PreTestScore,
+                PreTestPassedAt = application.PreTestPassedAt,
+                PreTestStatus = ApplicationStatusHelper.GetPreTestStatus(application, preTestAttempts),
+                PreTestAttemptsUsed = preTestAttempts,
+                IsTestPassed = application.IsTestPassed,
+                TestScore = application.TestScore,
+                PostTestScore = application.TestScore,
+                TestPassedAt = application.TestPassedAt,
+                PostTestStatus = ApplicationStatusHelper.GetPostTestStatus(application, postTestAttempts),
+                PostTestAttemptsUsed = postTestAttempts,
+                OverallAssessmentScore = ApplicationStatusHelper.GetOverallAssessmentScore(application),
+                CanTakePreTest = canTakePreTest,
+                CanTakeCompletionTest = canTakePostTest,
+                CanTakePostTest = canTakePostTest,
+                CoverImageUrl = internship != null
+                    ? InternshipCoverImageHelper.ResolveCoverImageUrl(internship)
+                    : null
             };
+        }
+
+        private async Task<Dictionary<Guid, (int PreTestAttempts, int PostTestAttempts)>>
+            GetAttemptCountsAsync(IEnumerable<Guid> applicationIds)
+        {
+            var ids = applicationIds.ToList();
+            if (ids.Count == 0)
+            {
+                return new Dictionary<Guid, (int, int)>();
+            }
+
+            try
+            {
+                var sessions = await _context.InternshipTestSessions
+                    .Where(x => ids.Contains(x.ApplicationId) && !x.IsDeleted)
+                    .Select(x => new { x.ApplicationId, x.TestType })
+                    .ToListAsync();
+
+                return sessions
+                    .GroupBy(x => x.ApplicationId)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => (
+                            PreTestAttempts: g.Count(x => x.TestType == TestType.PreTest),
+                            PostTestAttempts: g.Count(x => x.TestType == TestType.CompletionTest)
+                        ));
+            }
+            catch
+            {
+                return ids.ToDictionary(id => id, _ => (0, 0));
+            }
+        }
+
+        private static bool CanTakePreTest(Entities.Application application, int preTestAttemptsUsed)
+        {
+            if (application.IsCompleted || application.IsPreTestPassed) return false;
+            if (application.Status != ApplicationStatus.Accepted) return false;
+            return preTestAttemptsUsed < 1;
+        }
+
+        private static bool CanTakeCompletionTest(Entities.Application application, int postTestAttemptsUsed)
+        {
+            if (application.IsCompleted || application.IsTestPassed) return false;
+            if (!application.IsPreTestPassed) return false;
+            if (application.Status != ApplicationStatus.InProgress) return false;
+            return postTestAttemptsUsed < 5;
         }
 
         // GET STUDENT APPLICATIONS
@@ -204,27 +245,8 @@ namespace InternshipPortal.API.Services.Application
                 .OrderByDescending(x => x.AppliedAt)
                 .ToListAsync();
 
-            return applications.Select(application => new ApplicationResponseDto
-            {
-                Id = application.Id,
-                StudentId = application.StudentId,
-                StudentName = application.Student.FullName,
-                InternshipId = application.InternshipId,
-                InternshipTitle = application.Internship.Title,
-                CompanyName = application.Internship.CompanyName,
-                Status = application.Status.ToString(),
-                AdminRemarks = application.AdminRemarks,
-                AppliedAt = application.AppliedAt,
-                ReviewedAt = application.ReviewedAt,
-                CreatedAt = application.CreatedAt,
-                UpdatedAt = application.UpdatedAt,
-                IsCompleted = application.IsCompleted,
-                CompletedAt = application.CompletedAt,
-                CertificateUrl = application.CertificateUrl,
-                IsTestPassed = application.IsTestPassed,
-                TestScore = application.TestScore,
-                TestPassedAt = application.TestPassedAt
-            });
+            var attemptCounts = await GetAttemptCountsAsync(applications.Select(a => a.Id));
+            return applications.Select(a => MapToResponseDto(a, attemptCounts: attemptCounts));
         }
 
         // GET INTERNSHIP APPLICATIONS
@@ -237,27 +259,64 @@ namespace InternshipPortal.API.Services.Application
                 .OrderByDescending(x => x.AppliedAt)
                 .ToListAsync();
 
-            return applications.Select(application => new ApplicationResponseDto
+            var attemptCounts = await GetAttemptCountsAsync(applications.Select(a => a.Id));
+            return applications.Select(a => MapToResponseDto(a, attemptCounts: attemptCounts));
+        }
+
+        public async Task<StudentAssessmentDto?> GetStudentAssessmentAsync(
+            Guid applicationId,
+            Guid adminId)
+        {
+            var application = await _context.Applications
+                .Include(x => x.Student)
+                .Include(x => x.Internship)
+                .FirstOrDefaultAsync(x =>
+                    x.Id == applicationId &&
+                    !x.IsDeleted);
+
+            if (application == null)
             {
-                Id = application.Id,
-                StudentId = application.StudentId,
-                StudentName = application.Student.FullName,
-                InternshipId = application.InternshipId,
-                InternshipTitle = application.Internship.Title,
-                CompanyName = application.Internship.CompanyName,
-                Status = application.Status.ToString(),
-                AdminRemarks = application.AdminRemarks,
-                AppliedAt = application.AppliedAt,
-                ReviewedAt = application.ReviewedAt,
-                CreatedAt = application.CreatedAt,
-                UpdatedAt = application.UpdatedAt,
-                IsCompleted = application.IsCompleted,
-                CompletedAt = application.CompletedAt,
-                CertificateUrl = application.CertificateUrl,
-                IsTestPassed = application.IsTestPassed,
-                TestScore = application.TestScore,
-                TestPassedAt = application.TestPassedAt
-            });
+                return null;
+            }
+
+            if (application.Internship.AdminId != adminId)
+            {
+                throw new Exception("You are not authorized to view this assessment");
+            }
+
+            var attemptCounts = await GetAttemptCountsAsync(new[] { application.Id });
+            var preTestAttempts = attemptCounts.TryGetValue(application.Id, out var counts)
+                ? counts.PreTestAttempts
+                : 0;
+            var postTestAttempts = attemptCounts.TryGetValue(application.Id, out counts)
+                ? counts.PostTestAttempts
+                : 0;
+
+            var mapped = MapToResponseDto(application, attemptCounts: attemptCounts);
+
+            return new StudentAssessmentDto
+            {
+                ApplicationId = mapped.Id,
+                StudentId = mapped.StudentId,
+                StudentName = mapped.StudentName,
+                StudentEmail = application.Student.Email ?? string.Empty,
+                InternshipId = mapped.InternshipId,
+                InternshipTitle = mapped.InternshipTitle,
+                Status = mapped.Status,
+                DisplayStatus = mapped.DisplayStatus,
+                DisplayPhase = mapped.DisplayPhase,
+                PreTestStatus = mapped.PreTestStatus,
+                PreTestScore = mapped.PreTestScore,
+                PreTestPassedAt = mapped.PreTestPassedAt,
+                PreTestAttemptsUsed = preTestAttempts,
+                PostTestStatus = mapped.PostTestStatus,
+                PostTestScore = mapped.PostTestScore,
+                PostTestPassedAt = mapped.TestPassedAt,
+                PostTestAttemptsUsed = postTestAttempts,
+                OverallAssessmentScore = mapped.OverallAssessmentScore,
+                CanTakePreTest = mapped.CanTakePreTest,
+                CanTakePostTest = mapped.CanTakePostTest
+            };
         }
 
         // UPDATE APPLICATION STATUS
@@ -358,6 +417,17 @@ namespace InternshipPortal.API.Services.Application
                 $"Application Status Updated - {application.Internship.Title}";
 
             // EMAIL BODY
+            var preTestSection = parsedStatus == ApplicationStatus.Accepted
+                ? $@"
+
+IMPORTANT — PRE-TEST REQUIRED:
+Your application has been accepted! You must complete a one-time pre-test (10 questions on algorithms, data structures, and complexity) with a minimum score of 70% to begin your internship.
+
+Log in to your Student Portal → My Applications → Take Pre-Test.
+
+You get only ONE attempt, so prepare well before starting."
+                : string.Empty;
+
             var body = $@"
 Hello {application.Student.FullName},
 
@@ -372,6 +442,7 @@ NEW STATUS:
 
 ADMIN REMARKS:
 {application.AdminRemarks}
+{preTestSection}
 
 Thank you,
 Internship Portal
@@ -392,55 +463,17 @@ Internship Portal
                 "ApplicationStatus"
             );
 
-            return new ApplicationResponseDto
+            if (parsedStatus == ApplicationStatus.Accepted)
             {
-                Id = application.Id,
-
-                // STUDENT
-                StudentId =
+                await _notificationService.CreateNotificationAsync(
                     application.StudentId,
+                    "Pre-test Required",
+                    $"Complete your one-time pre-test for '{application.Internship.Title}' to start your internship. Go to My Applications.",
+                    "PreTestRequired"
+                );
+            }
 
-                StudentName =
-                    application.Student.FullName,
-
-                // INTERNSHIP
-                InternshipId =
-                    application.InternshipId,
-
-                InternshipTitle =
-                    application.Internship.Title,
-
-                CompanyName =
-                    application.Internship.CompanyName,
-
-                // STATUS
-                Status =
-                    application.Status.ToString(),
-
-                AdminRemarks =
-                    application.AdminRemarks,
-
-                // DATES
-                AppliedAt =
-                    application.AppliedAt,
-
-                ReviewedAt =
-                    application.ReviewedAt,
-
-                // AUDIT
-                CreatedAt =
-                    application.CreatedAt,
-
-                UpdatedAt =
-                    application.UpdatedAt,
-
-                IsCompleted = application.IsCompleted,
-                CompletedAt = application.CompletedAt,
-                CertificateUrl = application.CertificateUrl,
-                IsTestPassed = application.IsTestPassed,
-                TestScore = application.TestScore,
-                TestPassedAt = application.TestPassedAt
-            };
+            return await MapSingleApplicationAsync(application);
         }
 
         // COMPLETE INTERNSHIP
@@ -472,7 +505,14 @@ Internship Portal
                 );
             }
 
-            // MUST HAVE PASSED COMPLETION TEST
+            // MUST HAVE PASSED PRE-TEST AND COMPLETION TEST
+            if (!application.IsPreTestPassed)
+            {
+                throw new Exception(
+                    "Student must pass the pre-test before completing the internship"
+                );
+            }
+
             if (!application.IsTestPassed)
             {
                 throw new Exception(
@@ -544,56 +584,7 @@ Internship Portal Team
                 "ApplicationStatus"
             );
 
-            return new ApplicationResponseDto
-            {
-                Id = application.Id,
-
-                StudentId =
-                    application.StudentId,
-
-                StudentName =
-                    application.Student.FullName,
-
-                InternshipId =
-                    application.InternshipId,
-
-                InternshipTitle =
-                    application.Internship.Title,
-
-                CompanyName =
-                    application.Internship.CompanyName,
-
-                Status =
-                    application.Status.ToString(),
-
-                AdminRemarks =
-                    application.AdminRemarks,
-
-                AppliedAt =
-                    application.AppliedAt,
-
-                ReviewedAt =
-                    application.ReviewedAt,
-
-                CreatedAt =
-                    application.CreatedAt,
-
-                UpdatedAt =
-                    application.UpdatedAt,
-
-                IsCompleted =
-                    application.IsCompleted,
-
-                CompletedAt =
-                    application.CompletedAt,
-
-                CertificateUrl =
-                    application.CertificateUrl,
-
-                IsTestPassed = application.IsTestPassed,
-                TestScore = application.TestScore,
-                TestPassedAt = application.TestPassedAt
-            };
+            return await MapSingleApplicationAsync(application);
         }
 
         public async Task<CertificateDetailsDto?>
@@ -624,9 +615,15 @@ Internship Portal Team
                 EndDate = application.Internship.EndDate,
                 CompletedAt = application.CompletedAt ?? DateTime.UtcNow,
                 VerificationCode = code,
-                CoverImageUrl = application.Internship.CoverImageUrl,
+                CoverImageUrl = InternshipCoverImageHelper.ResolveCoverImageUrl(application.Internship),
                 IsCompleted = application.IsCompleted
             };
+        }
+
+        private async Task<ApplicationResponseDto> MapSingleApplicationAsync(Entities.Application application)
+        {
+            var attemptCounts = await GetAttemptCountsAsync(new[] { application.Id });
+            return MapToResponseDto(application, attemptCounts: attemptCounts);
         }
     }
 }

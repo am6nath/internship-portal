@@ -64,8 +64,17 @@ namespace InternshipPortal.API.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<bool>("IsPreTestPassed")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<bool>("IsTestPassed")
                         .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime?>("PreTestPassedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<decimal?>("PreTestScore")
+                        .HasColumnType("decimal(65,30)");
 
                     b.Property<DateTime?>("ReviewedAt")
                         .HasColumnType("datetime(6)");
@@ -518,6 +527,10 @@ namespace InternshipPortal.API.Migrations
 
                     b.Property<int>("TotalQuestions")
                         .HasColumnType("int");
+
+                    b.Property<string>("TestType")
+                        .IsRequired()
+                        .HasColumnType("longtext");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime(6)");

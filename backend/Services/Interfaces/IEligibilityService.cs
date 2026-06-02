@@ -7,5 +7,12 @@ namespace InternshipPortal.API.Services.Interfaces
         Task<IEnumerable<InternshipResponseDto>>
             GetEligibleInternshipsAsync(
                 Guid studentId);
+
+        Task<IEnumerable<InternshipResponseDto>>
+            GetBrowseInternshipsAsync(
+                Guid studentId);
+
+        Task<IEnumerable<InternshipResponseDto>>
+            GetOpenInternshipsAsync();
     }
 }

@@ -29,6 +29,13 @@ namespace InternshipPortal.API.Entities
 
         public string? CertificateUrl { get; set; }
 
+        // Pre-test (one attempt, required after acceptance)
+        public bool IsPreTestPassed { get; set; }
+
+        public decimal? PreTestScore { get; set; }
+
+        public DateTime? PreTestPassedAt { get; set; }
+
         // Completion test (Open Trivia DB)
         public bool IsTestPassed { get; set; }
 

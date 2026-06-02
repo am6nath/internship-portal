@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using InternshipPortal.API.DTOs.TrainingMaterial;
+using InternshipPortal.API.Helpers;
 using InternshipPortal.API.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,26 +27,54 @@ namespace InternshipPortal.API.Controllers
         // UPLOAD MATERIAL
         [Authorize(Roles = "Admin")]
         [HttpPost("upload")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(15 * 1024 * 1024)]
         public async Task<IActionResult>
             UploadMaterial(
                 [FromForm]
                 UploadTrainingMaterialDto model)
         {
-            var adminId =
-                GetCurrentUserId();
-
-            await _trainingMaterialService
-                .UploadMaterialAsync(
-                    adminId,
-                    model);
-
-            return Ok(new
+            try
             {
-                success = true,
-                statusCode = 200,
-                message =
-                    "Training material uploaded successfully"
-            });
+                model.File ??= FileUploadHelper.ResolveFormFile(
+                    Request,
+                    "file",
+                    "document",
+                    "upload");
+
+                if (model.File == null)
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        statusCode = 400,
+                        message = "No file received. Use multipart/form-data with field name 'file'."
+                    });
+                }
+
+                var adminId = GetCurrentUserId();
+
+                await _trainingMaterialService
+                    .UploadMaterialAsync(
+                        adminId,
+                        model);
+
+                return Ok(new
+                {
+                    success = true,
+                    statusCode = 200,
+                    message = "Training material uploaded successfully"
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    statusCode = 400,
+                    message = ex.Message
+                });
+            }
         }
 
         // GET INTERNSHIP MATERIALS
@@ -117,11 +146,7 @@ namespace InternshipPortal.API.Controllers
         // GET CURRENT USER ID
         private Guid GetCurrentUserId()
         {
-            var userId =
-                User.FindFirstValue(
-                    ClaimTypes.NameIdentifier);
-
-            return Guid.Parse(userId!);
+            return User.GetCurrentUserId();
         }
     }
 }
