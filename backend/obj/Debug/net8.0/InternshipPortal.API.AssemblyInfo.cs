@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("InternshipPortal.API")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+62d8cf0c0a55f28ee3fbeb5ae48f8673c2145456")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4b021fd4e015b83aac00623d5f9c1ea9ed38215b")]
 [assembly: System.Reflection.AssemblyProductAttribute("InternshipPortal.API")]
 [assembly: System.Reflection.AssemblyTitleAttribute("InternshipPortal.API")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
